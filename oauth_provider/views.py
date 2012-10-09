@@ -1,15 +1,19 @@
+import oauth2 as oauth
 from urllib import urlencode
 
-import oauth2 as oauth
+from annoying.decorators import ajax_request
+
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.translation import ugettext as _
 from django.core.urlresolvers import get_callable
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.shortcuts import render
+from django.utils.translation import ugettext as _
+from django.views.decorators.csrf import csrf_exempt
 
 from decorators import oauth_required
-from forms import AuthorizeRequestTokenForm
+from forms import AuthorizeRequestTokenForm, DeauthorizeConsumer
+from oauth_provider.models import Consumer, Token
 from store import store, InvalidConsumerError, InvalidTokenError
 from utils import verify_oauth_request, get_oauth_request, require_params, send_oauth_error
 from consts import OUT_OF_BAND
@@ -71,6 +75,7 @@ def user_authorization(request, form_class=AuthorizeRequestTokenForm):
             if form.cleaned_data['authorize_access']:
                 request_token = store.authorize_request_token(request, oauth_request, request_token)
                 args = { 'oauth_token': request_token.key }
+
             else:
                 args = { 'error': _('Access not granted by user.') }
             if request_token.callback is not None and request_token.callback != OUT_OF_BAND:
@@ -98,12 +103,12 @@ def user_authorization(request, form_class=AuthorizeRequestTokenForm):
         # set the oauth flag
         request.session['oauth'] = request_token.key
         response = authorize_view(request, request_token, request_token.get_callback_url(), params)
-        
     return response
 
 
 @csrf_exempt
 def access_token(request):
+
     oauth_request = get_oauth_request(request)
     if oauth_request is None:
         return INVALID_PARAMS_RESPONSE
@@ -161,3 +166,20 @@ def fake_callback_view(request, **args):
     You can define your own in ``settings.OAUTH_CALLBACK_VIEW``.
     """
     return HttpResponse('Fake callback view.')
+
+
+@login_required
+def apps(request):
+    user = request.user
+    apps = Consumer.objects.filter(token__token_type=Token.ACCESS, token__user=user).distinct()
+    return render(request, 'api/my_apps.html', locals())
+
+@login_required
+@ajax_request
+def deauthorize(request):
+    form = DeauthorizeConsumer(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        form.delete(request.user.pk)
+        return {"ok": True}
+    else:
+        return {"ok": False, "text": form.errors}

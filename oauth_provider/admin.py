@@ -9,7 +9,9 @@ class ConsumerAdmin(admin.ModelAdmin):
 	raw_id_fields = ['user',]
 
 class TokenAdmin(admin.ModelAdmin):
-	raw_id_fields = ['user', 'consumer', 'resource']
+    list_display = ('__unicode__', 'is_approved', 'user', 'consumer',
+                    'resource','timestamp',)
+    raw_id_fields = ['user', 'consumer', 'resource']
 	
 
 admin.site.register(Resource, ResourceAdmin)

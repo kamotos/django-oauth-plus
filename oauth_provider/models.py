@@ -35,7 +35,10 @@ class Resource(models.Model):
 class Consumer(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField()
-    
+    logo = models.ImageField(upload_to="apps", null=True, blank=True)
+    company_name = models.CharField(max_length=255, null=True, blank=True)
+    url = models.URLField(null=True, blank=True)
+
     key = models.CharField(max_length=CONSUMER_KEY_SIZE)
     secret = models.CharField(max_length=SECRET_SIZE, blank=True)
 

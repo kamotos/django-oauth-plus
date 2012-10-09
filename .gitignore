@@ -1,5 +1,7 @@
 syntax:glob
 
+.idea/
+django_oauth_plus.egg-info/
 *.elc
 *.pyc
 *~

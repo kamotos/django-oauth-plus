@@ -173,7 +173,7 @@ for photos stored on photos.example.net. The Consumer registration is:
 We need to create the Protected Resource and the Consumer first::
 
     >>> from oauth_provider.models import Resource, Consumer
-    >>> resource = Resource(name='photos', url='/oauth/photo/')
+    >>> resource = Resource(name='photos', url='/api/v1/user/jane/')
     >>> resource.save()
     >>> CONSUMER_KEY = 'dpf43f3p2l4k3l03'
     >>> CONSUMER_SECRET = 'kd94hf93k423kf44'
@@ -197,7 +197,7 @@ The Service Provider includes the following header with the response::
     401
     >>> # depends on REALM_KEY_NAME Django setting
     >>> response._headers['www-authenticate']
-    ('WWW-Authenticate', 'OAuth realm=""')
+    ('WWW-Authenticate', 'OAuth realm="http://localhost.com:8000/"')
     >>> response.content
     'Invalid request parameters.'
 
@@ -283,7 +283,7 @@ The Service Provider asks Jane to sign-in using her username and password::
     >>> response.status_code
     302
     >>> response['Location']
-    'http://.../accounts/login/?next=/oauth/authorize/%3Foauth_token%3D...'
+    'http://testserver/login/?next=/oauth/authorize/%3Foauth_token%3D...'
     >>> token.key in response['Location']
     True
 
@@ -298,9 +298,7 @@ redirects her back to the Consumer's callback URL::
     >>> response = c.get("/oauth/authorize/", parameters)
     >>> response.status_code
     200
-    >>> response.content
-    'Fake authorize view for printer.example.com with params: oauth_token=...'
-    
+
     >>> # fake authorization by the user
     >>> parameters['authorize_access'] = 1
     >>> response = c.post("/oauth/authorize/", parameters)
@@ -468,7 +466,7 @@ as key)::
 
     >>> import oauth2 as oauth
     >>> oauth_request = oauth.Request.from_token_and_callback(access_token,
-    ...     http_url='http://testserver/oauth/photo/', parameters=parameters)
+    ...     http_url='http://testserver/api/v1/user/jane/', parameters=parameters)
     >>> signature_method = oauth.SignatureMethod_HMAC_SHA1()
     >>> signature = signature_method.sign(oauth_request, consumer, access_token)
 
@@ -479,23 +477,23 @@ Requesting Protected Resource
 All together, the Consumer request for the photo is::
 
     >>> parameters['oauth_signature'] = signature
-    >>> response = c.get("/oauth/photo/", parameters)
+    >>> response = c.get("/api/v1/user/jane/", parameters)
     >>> response.status_code
     200
     >>> response.content
-    'Protected Resource access!'
+    '{"bio": null, "city": null, "country": "", "favorites_brands": [], "favorites_topics": [], "first_name": "", "gender": null, "id": "1", "last_name": "", "resource_uri": "/api/v1/user/1/", "socialiq_score": 0.0, "username": "jane"}'
 
 Otherwise, an explicit error will be raised::
 
     >>> parameters['oauth_signature'] = 'wrongsignature'
     >>> parameters['oauth_nonce'] = 'anotheraccessresourcenonce'
-    >>> response = c.get("/oauth/photo/", parameters)
+    >>> response = c.get("/api/v1/user/jane/", parameters)
     >>> response.status_code
     401
     >>> response.content
-    'Invalid signature. Expected signature base string: GET&http%3A%2F%2F...%2Foauth%2Fphoto%2F&oauth_...'
+    'Invalid signature. Expected signature base string: GET&http%3A%2F%2F...%2Fapi%2Fv1%2Fuser%2Fjane%2F&oauth_...'
 
-    >>> response = c.get("/oauth/photo/")
+    >>> response = c.get("/api/v1/user/jane/")
     >>> response.status_code
     401
     >>> response.content
@@ -513,7 +511,7 @@ be able to access the Protected Resource anymore::
     >>> # token is not revoked by Jane because we reuse a previously used one.
     >>> parameters['oauth_signature'] = signature
     >>> parameters['oauth_nonce'] = 'yetanotheraccessresourcenonce'
-    >>> response = c.get("/oauth/photo/", parameters)
+    >>> response = c.get("/api/v1/user/jane/", parameters)
     >>> response.status_code
     401
     >>> response.content
@@ -521,15 +519,21 @@ be able to access the Protected Resource anymore::
 
 """
 
-import time
+import json
 import re
+import time
 
+from django_factory_boy.auth import UserF
+
+from django.core.urlresolvers import reverse
 from django.test import TestCase
 from django.test.client import Client
 
 from django.contrib.auth.models import User
-from oauth_provider.models import Resource, Consumer
-from oauth_provider.models import Token
+
+from oauth_provider.models import Resource, Consumer, Token
+from factories import ConsumerFactory, TokenFactory
+from views import deauthorize, apps as apps_view
 
 
 
@@ -542,7 +546,7 @@ class OAuthTestsBug10(TestCase):
         password = self.password = 'toto'
         email = self.email = 'jane@example.com'
         jane = self.jane = User.objects.create_user(username, email, password)
-        resource = self.resource = Resource(name='photos', url='/oauth/photo/')
+        resource = self.resource = Resource(name='photos', url='/api/v1/user/jane/')
         resource.save()
         CONSUMER_KEY = self.CONSUMER_KEY = 'dpf43f3p2l4k3l03'
         CONSUMER_SECRET = self.CONSUMER_SECRET = 'kd94hf93k423kf44'
@@ -612,4 +616,58 @@ class OAuthTestsBug10(TestCase):
             302)
         self.assertEqual('http://printer.example.com/request_token_ready?error=Access+not+granted+by+user.', response['Location'])
         self.c.logout()
+
+
+class DeauthorizeViewTestCases(TestCase):
+    def setUp(self):
+        user = UserF(username="test")
+        user.set_password('test')
+        user.save()
+
+        self.user = user
+        self.client.login(username="test", password="test")
+
+    def test_deauthorize_consumer(self):
+        user = self.user
+        token = TokenFactory(user=user)
+
+        self.assertIn(token, user.tokens.all())
+        response = self.client.post(reverse(deauthorize), data={"application": token.consumer.id})
+        self.assertEqual(response.status_code, 200)
+        json_response = json.loads(response.content)
+        self.assertTrue(json_response['ok'])
+
+        self.assertEqual(Token.objects.filter(pk=token.id).count(), 0)
+
+    def test_deauthorize_invalid_consumer(self):
+        wrong_consumer_id = 9999
+        response = self.client.post(reverse(deauthorize), data={"application": wrong_consumer_id})
+        json_response = json.loads(response.content)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(json_response['ok'])
+
+
+class AppsViewTestCases(TestCase):
+    def setUp(self):
+        user = UserF(username="test")
+        user.set_password('test')
+        user.save()
+
+        self.user = user
+        self.client.login(username="test", password="test")
+
+    def test_listed_apps(self):
+        consumers_ids = []
+        tokens = []
+        for i in range(5):
+            consumer = ConsumerFactory()
+            consumers_ids.append(consumer.pk)
+            TokenFactory(user=self.user, consumer=consumer)
+
+        response = self.client.get(reverse(apps_view))
+
+        apps = response.context['apps']
+        returned_apps_ids = apps.values_list('id', flat=True)
+        self.assertListEqual(list(returned_apps_ids), consumers_ids)
+
 
