@@ -531,10 +531,11 @@ from django.test.client import Client
 
 from django.contrib.auth.models import User
 
-from oauth_provider.models import Resource, Consumer, Token
 from factories import ConsumerFactory, TokenFactory
+from profile.tests.merge import MergeAccountTestCaseAbstract
 from views import deauthorize, apps as apps_view
 
+from oauth_provider.models import Resource, Consumer, Token
 
 
 class OAuthTestsBug10(TestCase):
@@ -671,3 +672,11 @@ class AppsViewTestCases(TestCase):
         self.assertListEqual(list(returned_apps_ids), consumers_ids)
 
 
+class MergeConsumerTestCases(MergeAccountTestCaseAbstract):
+    model = Consumer
+    model_factory = ConsumerFactory
+
+
+class MergeTokenTestCases(MergeAccountTestCaseAbstract):
+    model = Token
+    model_factory = TokenFactory
